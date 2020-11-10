@@ -14,11 +14,13 @@ for(name in filenames)
 
 str(data)
 
-data<-data[data$journal!="",]
+# Delete the date with missing journal
+# data<-data[data$journal!="",]
 
-text_df <- tibble(paper = 1:nrow(data), journal = data$journal)
-tt = text_df
-A = cast_sparse(tt, paper, journal)
+
+text_df <- tibble(paper = 1:nrow(data), abstract = data$abstract)
+tt  = text_df %>% unnest_tokens(word, abstract)
+A = cast_sparse(tt, paper, word)
 str(A)
 dim(A)
 hist(rowSums(A))
@@ -27,9 +29,22 @@ cs = colSums(A)
 
 
 library(vsp)
-fa = vsp(A, rank = 3)
+fa = vsp(A, rank = 5)
 
-journal = text_df$journal
-apply(fa$Y,2, function(x) journal[order(-x)[1:20]])%>%View
+abstract = text_df$abstract
 
-plot_varimax_z_pairs(fa, 1:3)
+
+topPapers = 5
+# just run the next code chunk...
+
+topDoc = fa$Z %>% 
+  apply(2,
+        function(x) which(rank(-x, ties.method = "random") <= topPapers)
+  )
+for(j in 1:ncol(topDoc)){
+  paste("topic", j, "\n \n") %>% cat
+  data$title[topDoc[,j]] %>% print
+  paste("\n \n \n") %>% cat
+}
+plot(fa$d)
+plot_varimax_z_pairs(fa, 1:5)

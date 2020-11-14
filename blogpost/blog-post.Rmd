@@ -1,0 +1,208 @@
+---
+title: "A Little Example Using Vintage Sparse PCA on Semantic Scholar Dataset"
+author: "Xiaotian Wang, Ying Chen"
+date: "11/9/2020"
+output: 
+  html_document:
+    code_folding: hide
+  
+---
+
+### Background and Data
+
+
+Full data can be found [here](http://s2-public-api-prod.us-west-2.elasticbeanstalk.com/corpus/).
+
+The main purpose is to explore the features of papers using or mentioning LASSO. We use the semantic scholar dataset, which provides detailed information on research papers. The huge dataset gives us a chance to explore publishing pattern. we use LASSO as key word, journal names as variable of interest. We bring in title, abstract, year published, and journal name of each paper. The r codes to get data are as belows. Every record in each raw data file is searched. If the record contains 'LASSO' (not case sensitive), the information we need will be stored in a separate spreadsheet. We put all .csv spreadsheet in the data folder.  
+
+```{r,message = FALSE}
+library(data.table)
+library(tidyverse)
+library(tidytext)
+library(Matrix)
+library(vsp)
+```
+
+
+```{r, eval=FALSE,message=FALSE}
+library(tidyverse)
+source("code/getData.R")
+
+includeLine = function(x) {
+  if(nchar(x$paperAbstract) == 0) return(F) 
+  grepl("lasso", x$paperAbstract,ignore.case = TRUE)
+}
+
+processLine = function(x) tibble(title = x$title, 
+                                 abstract = x$paperAbstract,
+                                 year = x$year,
+                                 journal = x$journalName)
+outputPath = "LASSO"
+
+processDataFiles(includeLine, processLine, outputPath)
+
+dat = pullDataFiles(outputPath)
+```
+
+
+We read the data line by line, and decide whether to process the line by the includeLine function. 
+For getData function, it can be found [here](./getData.R), and [here](./getLine.R).
+
+
+### Data Exploration
+Now we have all research papers that mentioned 'LASSO' in abstract. Let's take a look on them.
+
+```{r,warning=FALSE,message=FALSE}
+rm(list = ls())
+filenames = list.files("data/LASSO")
+data = data.frame()
+for(name in filenames)
+{
+  temp = read.csv(paste("data/LASSO/",name,sep=''))
+  data = rbind(data,temp)
+}
+# Delete the date with missing journal
+data<-data[data$journal!="",]
+
+str(data)
+
+freq<-data %>% group_by(journal) %>% mutate(Frequency=n())
+freq %>% arrange(desc(Frequency))  %>% distinct(journal, Frequency) %>% 
+  filter(Frequency>50)
+
+```
+Journals or archives with most papers that mentioned LASSO are ArXiv (290), asXiv: Methodology (160), arXiv: Statistics Theory (154), PLoS ONE (126) and bioRxiv (82). Among the 4,281 journals, there are 262 journals/archives with more than 5 papers that mention LASSO.  
+
+Next, instead of viewing each abstract as a whole object, we get words out of the text. By doing so, we are able to see if these papers have anything in common. 
+
+
+### Factors
+Based on the paper-word pair, we create a matrix with paper ID as row and each word as column. Then, we try the vsp package to see if there are any factors standing out.
+```{r}
+text_df <- tibble(paper = 1:nrow(data), abstract = data$abstract)
+tt  = text_df %>% unnest_tokens(word, abstract)
+A = cast_sparse(tt, paper, word)
+str(A)
+dim(A)
+cs = colSums(A)
+
+fa = vsp(A, rank = 3)
+fa
+abstract = text_df$abstract
+
+```
+
+We do the clustering on the paper-word matrix with rank 3, and see what will happen.
+
+```{r}
+topPapers = 5
+
+topDoc = fa$Z %>% 
+  apply(2,
+        function(x) which(rank(-x, ties.method = "random") <= topPapers)
+  )
+for(j in 1:ncol(topDoc)){
+  paste("topic", j, "\n \n") %>% cat
+  data$title[topDoc[,j]] %>% print
+  paste("\n \n \n") %>% cat
+}
+```
+
+Looking at the top five papers in each clusters, we can see that the titles of the papers are gathered by the languages.
+
+For the first cluster, they are mostly English paper, and for the 2nd and 3rd, they are French and German.
+
+Note: although some titles of papers in cluster 2 look like they are English paper, in fact their abstracts are of different languages.
+
+```{r}
+fa2 = vsp(A, rank = 7)
+plot(fa2$d)
+```
+
+```{r}
+plot_varimax_z_pairs(fa, 1:3)
+```
+
+From the plot above, we may conclude that there are some papers with more than one abstracts which are of different languages(just like the papers appearing in cluster 2).
+
+We now see the best feature functions
+
+```{r}
+bff(fa$Z,A,6) %>% print
+```
+
+We can see that for these clusters, the results are the commonly used words in English, French and German seperately.
+
+
+### Attempts on the Analysis on English-only Papers
+
+From the above result, papers are clustered together by different languages. Then, what if we focus only on one language? As most papers are in English, we repeat the similar analysis among papers in English.
+
+We can use the new includeLine function
+```{r,eval=FALSE}
+includeLine = function(x) {
+  if(nchar(x$paperAbstract) == 0) return(F) 
+  grepl("lasso", x$paperAbstract,ignore.case = TRUE)&grepl("regression", x$paperAbstract,ignore.case = TRUE)
+}
+```
+
+The new includeLine rule becomes we process the line only when it includes the keywords LASSO and the commenly used English word "regression"" in the technical papers mentioning LASSO.
+
+```{r}
+filenames = list.files("data/LASSOreg")
+data = data.frame()
+for(name in filenames)
+{
+  temp = read.csv(paste("data/LASSOreg/",name,sep=''))
+  data = rbind(data,temp)
+}
+
+str(data)
+
+# Delete the date with missing journal
+# data<-data[data$journal!="",]
+
+
+text_df <- tibble(paper = 1:nrow(data), abstract = data$abstract)
+tt  = text_df %>% unnest_tokens(word, abstract)
+A = cast_sparse(tt, paper, word)
+str(A)
+dim(A)
+# hist(rowSums(A))
+# cs = colSums(A)
+#hist(log(cs[cs>1]))
+
+
+library(vsp)
+fa = vsp(A, rank = 4)
+
+abstract = text_df$abstract
+
+
+topPapers = 5
+# just run the next code chunk...
+
+topDoc = fa$Z %>% 
+  apply(2,
+        function(x) which(rank(-x, ties.method = "random") <= topPapers)
+  )
+for(j in 1:ncol(topDoc)){
+  paste("topic", j, "\n \n") %>% cat
+  data$title[topDoc[,j]] %>% print
+  paste("\n \n \n") %>% cat
+}
+fa2 = vsp(A, rank = 8)
+
+plot(fa2$d)
+plot_varimax_z_pairs(fa, 1:4)
+
+bff(fa$Z,A,6) %>% print
+```
+
+We try to get rid of the influence from different language and instead, wish to find out the clusters from different technical topics. However the influence from the language still exists. As we mentioned before, there are some papers with more than one abstracts which are of different language. As a result, we can see our result this time that it can show the factors from both technical toplics and language.
+
+From the bff results, we can see that for cluster 1, they show some statistical features from the word like "linear" and "sparsity", while in cluster 3, there are some words like "patients" and "clinical" from medicine.
+
+However, for cluster 2 and 4, they are still some words from different language.(Note: the bff results from cluster 4 are in fact some Chinese characters from Unicode). So we still can not get rid of the influence from different language thoroughly.
+
+
